@@ -338,6 +338,9 @@ class Host(object):
         self.current_tuner_mute = self.prefs.get("tuner-mutes-outputs", False, bool)
         self.current_tuner_ref_freq = self.prefs.get("tuner-reference-frequency", 440, int)
 
+        # Use to cycle through bank pedal boards with a single control change command
+        self.current_pedal_index = 0
+
         if self.descriptor.get('factory_pedalboards', False):
             self.supports_factory_banks = True
             self.pedalboard_index_offset = 0
@@ -347,7 +350,9 @@ class Host(object):
             self.supports_factory_banks = False
             self.pedalboard_index_offset = 1
             self.userbanks_offset = 1
-            self.first_user_bank = 0
+            # Make the first bank always be the selected one
+            # bank selection will work by setting the desired bank in the first position
+            self.first_user_bank = 1
 
         self.web_connected = False
         self.web_data_ready_counter = 0
@@ -1127,7 +1132,8 @@ class Host(object):
         yield gen.Task(self.wait_hmi_initialized)
 
         if pedalboard and os.path.exists(pedalboard):
-            self.bank_id = bank_id
+            # make the first bank always the selected one
+            self.bank_id = self.first_user_bank
             self.load(pedalboard)
 
         else:
@@ -1771,17 +1777,25 @@ class Host(object):
             if channel == self.profile.get_midi_prgch_channel("pedalboard"):
                 bank_id = self.bank_id
                 if bank_id >= self.userbanks_offset and bank_id - self.userbanks_offset <= len(self.userbanks):
+                    print(f"CUSTOM_DBG: Getting pedals from banks bank_id: {bank_id} len banks {len(self.userbanks)} offset {self.userbanks_offset}")
                     pedalboards = self.userbanks[bank_id - self.userbanks_offset]['pedalboards']
                 else:
+                    print("CUSTOM_DBG: Getting pedals from all-user-pedals")
                     pedalboards = self.alluserpedalboards
 
-                if program >= 0 and program < len(pedalboards):
-                    while self.next_hmi_pedalboard_loading:
-                        yield gen.sleep(0.25)
-                    try:
-                        yield gen.Task(self.hmi_load_bank_pedalboard, bank_id, program, from_hmi=False)
-                    except Exception as e:
-                        logging.exception(e)
+                print(f"CUSTOM_DBG: midi_program_change: channel: {channel} program: {program} bank_id: {bank_id} user banks: {self.userbanks}")
+
+                # if program >= 0 and program < len(pedalboards):
+                # cycle through pedalboard with a single click
+                self.current_pedal_index = (self.current_pedal_index + 1) % len(pedalboards)
+                print(f"CUSTOM_DBG: midi_program_change: selected pedalboard {self.current_pedal_index}")
+
+                while self.next_hmi_pedalboard_loading:
+                    yield gen.sleep(0.25)
+                try:
+                    yield gen.Task(self.hmi_load_bank_pedalboard, bank_id, self.current_pedal_index, from_hmi=False)
+                except Exception as e:
+                    logging.exception(e)
 
             elif channel == self.profile.get_midi_prgch_channel("snapshot"):
                 abort_catcher = self.abort_previous_loading_progress("midi_program_change")
@@ -2299,7 +2313,8 @@ class Host(object):
             os.makedirs(PEDALBOARD_TMP_DIR)
             callback(ok)
 
-        self.bank_id = bank_id if bank_id is not None else self.first_user_bank
+        # Make the first bank always be the selected one
+        self.bank_id = self.first_user_bank
         self.connections = []
         self.addressings.clear()
         self.mapper.clear()

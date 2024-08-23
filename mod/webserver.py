@@ -2069,8 +2069,9 @@ class AuthNonce(JsonRequestHandler):
             message = {}
         else:
             data    = json.loads(self.request.body.decode())
-            message = token.create_token_message(data['nonce'])
+            #message = token.create_token_message(data['nonce'])
 
+        message = {}
         self.write(message)
 
 class AuthToken(JsonRequestHandler):
