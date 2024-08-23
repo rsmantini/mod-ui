@@ -340,6 +340,7 @@ class Host(object):
 
         # Use to cycle through bank pedal boards with a single control change command
         self.current_pedal_index = 0
+        self.current_nam_model_index = 0
 
         if self.descriptor.get('factory_pedalboards', False):
             self.supports_factory_banks = True
@@ -1547,8 +1548,8 @@ class Host(object):
 
     def start_session(self, callback):
         midi_pb_prgch, midi_ss_prgch = self.profile.get_midi_prgch_channels()
-        if midi_pb_prgch >= 1 and midi_pb_prgch <= 16:
-            self.send_notmodified("monitor_midi_program %d 0" % (midi_pb_prgch-1))
+        # if midi_pb_prgch >= 1 and midi_pb_prgch <= 16:
+        #     self.send_notmodified("monitor_midi_program %d 0" % (midi_pb_prgch-1))
 
         self.web_connected = True
         self.web_data_ready_counter = 0
@@ -1773,8 +1774,53 @@ class Host(object):
             msg_data = data.split(" ", 2)
             program  = int(msg_data[0])
             channel  = int(msg_data[1])+1
+            print(f"PEDALBOARD INFO: name: {self.pedalboard_name} path: {self.pedalboard_path}")
+            nam_models = safe_json_load(os.path.join(self.pedalboard_path, "nam_models.json"), list)
+            print(f"Nam models: {nam_models}")
 
-            if channel == self.profile.get_midi_prgch_channel("pedalboard"):
+            nam_plugins = []
+            for id, plugin in self.plugins.items():
+                if plugin.get("uri", "")  == "http://github.com/mikeoliphant/neural-amp-modeler-lv2":
+                    nam_plugins.append(plugin)
+
+            if len(nam_plugins) == 1:
+                presets = []
+                for root, dirs, files in os.walk(os.path.join(self.pedalboard_path, "nam_presets")):
+                    for dir in dirs:
+                        preset_dir = os.path.join(root, dir)
+                        presets.append(os.path.join(preset_dir, dir + ".ttl"))
+
+                presets.sort()
+                print(f"PRESETS: {presets}")
+                
+                nam_plugin = nam_plugins.pop()
+                current_preset = nam_plugin.get("preset", "")
+
+                try:
+                    next_preset_index = (presets.index(current_preset) + 1) % len(presets)
+                except ValueError:
+                    next_preset_index = 0
+
+                next_preset = presets[next_preset_index]
+                instance = plugin.get("instance", "")
+
+                print(f"PRESETS: instance {instance}, next_preset: {next_preset}")
+
+                def abort():
+                     print("Hello, World!")
+
+
+                def callback():
+                     print("Hello, World!")
+
+                try:
+                    yield self.preset_load_gen_helper(instance,  next_preset, False, abort, callback)
+                except Exception as e:
+                    logging.exception(e)
+
+                    
+            #if channel == self.profile.get_midi_prgch_channel("pedalboard"):
+            if False:
                 bank_id = self.bank_id
                 if bank_id >= self.userbanks_offset and bank_id - self.userbanks_offset <= len(self.userbanks):
                     print(f"CUSTOM_DBG: Getting pedals from banks bank_id: {bank_id} len banks {len(self.userbanks)} offset {self.userbanks_offset}")
