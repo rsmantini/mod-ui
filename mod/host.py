@@ -340,7 +340,7 @@ class Host(object):
 
         # Use to cycle through bank pedal boards with a single control change command
         self.current_pedal_index = 0
-        self.current_nam_model_index = 0
+        self.current_nam_preset_index = 0
 
         if self.descriptor.get('factory_pedalboards', False):
             self.supports_factory_banks = True
@@ -1774,74 +1774,68 @@ class Host(object):
             msg_data = data.split(" ", 2)
             program  = int(msg_data[0])
             channel  = int(msg_data[1])+1
-            print(f"PEDALBOARD INFO: name: {self.pedalboard_name} path: {self.pedalboard_path}")
-            nam_models = safe_json_load(os.path.join(self.pedalboard_path, "nam_models.json"), list)
-            print(f"Nam models: {nam_models}")
-
-            nam_plugins = []
-            for id, plugin in self.plugins.items():
-                if plugin.get("uri", "")  == "http://github.com/mikeoliphant/neural-amp-modeler-lv2":
-                    nam_plugins.append(plugin)
-
-            if len(nam_plugins) == 1:
-                presets = []
-                for root, dirs, files in os.walk(os.path.join(self.pedalboard_path, "nam_presets")):
-                    for dir in dirs:
-                        preset_dir = os.path.join(root, dir)
-                        presets.append(os.path.join(preset_dir, dir + ".ttl"))
-
-                presets.sort()
-                print(f"PRESETS: {presets}")
-                
-                nam_plugin = nam_plugins.pop()
-                current_preset = nam_plugin.get("preset", "")
-
-                try:
-                    next_preset_index = (presets.index(current_preset) + 1) % len(presets)
-                except ValueError:
-                    next_preset_index = 0
-
-                next_preset = presets[next_preset_index]
-                instance = plugin.get("instance", "")
-
-                print(f"PRESETS: instance {instance}, next_preset: {next_preset}")
-
-                def abort():
-                     print("Hello, World!")
-
-
-                def callback():
-                     print("Hello, World!")
-
-                try:
-                    yield self.preset_load_gen_helper(instance,  next_preset, False, abort, callback)
-                except Exception as e:
-                    logging.exception(e)
-
                     
-            #if channel == self.profile.get_midi_prgch_channel("pedalboard"):
-            if False:
-                bank_id = self.bank_id
-                if bank_id >= self.userbanks_offset and bank_id - self.userbanks_offset <= len(self.userbanks):
-                    print(f"CUSTOM_DBG: Getting pedals from banks bank_id: {bank_id} len banks {len(self.userbanks)} offset {self.userbanks_offset}")
-                    pedalboards = self.userbanks[bank_id - self.userbanks_offset]['pedalboards']
+            if channel == self.profile.get_midi_prgch_channel("pedalboard"):
+                if program == 0:
+                    print(f"PEDALBOARD INFO: name: {self.pedalboard_name} path: {self.pedalboard_path}")
+
+                    nam_models = safe_json_load(os.path.join(self.pedalboard_path, "nam_models.json"), list)
+                    print(f"Nam models: {nam_models}")
+
+                    nam_plugins = []
+                    for id, plugin in self.plugins.items():
+                        if plugin.get("uri", "")  == "http://github.com/mikeoliphant/neural-amp-modeler-lv2":
+                            nam_plugins.append(plugin)
+
+                    if len(nam_plugins) == 1:
+                        presets = []
+                        for root, dirs, files in os.walk(os.path.join(self.pedalboard_path, "nam_presets")):
+                            for dir in dirs:
+                                preset_dir = os.path.join(root, dir)
+                                presets.append("file://" + os.path.join(preset_dir, dir + ".ttl"))
+
+                        if len(presets) > 0:
+                            presets.sort()
+                            print(f"PRESETS: {presets}")
+                            
+                            nam_plugin = nam_plugins.pop()
+
+                            self.current_nam_preset_index =  (self.current_nam_preset_index + 1) % len(presets)
+
+                            next_preset = presets[self.current_nam_preset_index]
+                            instance = plugin.get("instance", "")
+
+                            print(f"PRESETS: instance {instance}, next_preset: {next_preset}")
+
+
+                            abort_catcher = self.abort_previous_loading_progress("SELF")
+
+                            try:
+                                yield gen.Task(self.preset_load_gen_helper, instance,  next_preset, False, abort_catcher)
+                            except Exception as e:
+                                logging.exception(e)
                 else:
-                    print("CUSTOM_DBG: Getting pedals from all-user-pedals")
-                    pedalboards = self.alluserpedalboards
+                    bank_id = self.bank_id
+                    if bank_id >= self.userbanks_offset and bank_id - self.userbanks_offset <= len(self.userbanks):
+                        print(f"CUSTOM_DBG: Getting pedals from banks bank_id: {bank_id} len banks {len(self.userbanks)} offset {self.userbanks_offset}")
+                        pedalboards = self.userbanks[bank_id - self.userbanks_offset]['pedalboards']
+                    else:
+                        print("CUSTOM_DBG: Getting pedals from all-user-pedals")
+                        pedalboards = self.alluserpedalboards
 
-                print(f"CUSTOM_DBG: midi_program_change: channel: {channel} program: {program} bank_id: {bank_id} user banks: {self.userbanks}")
+                    print(f"CUSTOM_DBG: midi_program_change: channel: {channel} program: {program} bank_id: {bank_id} user banks: {self.userbanks}")
 
-                # if program >= 0 and program < len(pedalboards):
-                # cycle through pedalboard with a single click
-                self.current_pedal_index = (self.current_pedal_index + 1) % len(pedalboards)
-                print(f"CUSTOM_DBG: midi_program_change: selected pedalboard {self.current_pedal_index}")
+                    # if program >= 0 and program < len(pedalboards):
+                    # cycle through pedalboard with a single click
+                    self.current_pedal_index = (self.current_pedal_index + 1) % len(pedalboards)
+                    print(f"CUSTOM_DBG: midi_program_change: selected pedalboard {self.current_pedal_index}")
 
-                while self.next_hmi_pedalboard_loading:
-                    yield gen.sleep(0.25)
-                try:
-                    yield gen.Task(self.hmi_load_bank_pedalboard, bank_id, self.current_pedal_index, from_hmi=False)
-                except Exception as e:
-                    logging.exception(e)
+                    while self.next_hmi_pedalboard_loading:
+                        yield gen.sleep(0.25)
+                    try:
+                        yield gen.Task(self.hmi_load_bank_pedalboard, bank_id, self.current_pedal_index, from_hmi=False)
+                    except Exception as e:
+                        logging.exception(e)
 
             elif channel == self.profile.get_midi_prgch_channel("snapshot"):
                 abort_catcher = self.abort_previous_loading_progress("midi_program_change")
