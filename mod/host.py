@@ -340,6 +340,7 @@ class Host(object):
 
         # Use to cycle through bank pedal boards with a single control change command
         self.current_pedal_index = 0
+        self.snapshot_index = 0
 
         if self.descriptor.get('factory_pedalboards', False):
             self.supports_factory_banks = True
@@ -1800,7 +1801,8 @@ class Host(object):
             elif channel == self.profile.get_midi_prgch_channel("snapshot"):
                 abort_catcher = self.abort_previous_loading_progress("midi_program_change")
                 try:
-                    yield gen.Task(self.snapshot_load_gen_helper, program, False, abort_catcher)
+                    self.snapshot_index = (self.snapshot_index + 1) % len(self.pedalboard_snapshots)
+                    yield gen.Task(self.snapshot_load_gen_helper, self.snapshot_index, False, abort_catcher)
                 except Exception as e:
                     logging.exception(e)
                 else:
